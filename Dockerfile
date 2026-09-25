@@ -16,5 +16,9 @@ COPY . .
 # Khai báo cổng ứng dụng lắng nghe
 EXPOSE 3000
 
+# Thêm Healthcheck ở cấp độ Dockerfile cho Product API
+HEALTHCHECK --interval=15s --timeout=5s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+
 # Lệnh khởi chạy server API
 CMD ["node", "src/server.js"]
