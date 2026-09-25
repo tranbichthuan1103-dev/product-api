@@ -1,0 +1,63 @@
+name: Test Product CI
+
+on:
+  push:
+    branches:
+      - main
+      - Prompt-1
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  ci-pipeline:
+    name: Build & Test CI Pipeline
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 2. Cài đặt Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 3. Cài đặt dependencies
+        run: npm ci
+
+      - name: 4. Build Docker Image cho Product API
+        run: docker build -t product-api:latest .
+
+      - name: 5. Khởi chạy hệ thống bằng Docker Compose
+        run: |
+          docker compose up -d
+          echo "Chờ hệ thống khởi động và đạt trạng thái healthy..."
+          sleep 10
+          docker compose ps
+
+      - name: 6. Test thử nghiệm Health Check endpoint
+        run: |
+          echo "Kiểm tra endpoint /health:"
+          curl -f http://localhost:3000/health || exit 1
+
+      - name: 7. Test thử nghiệm tạo sản phẩm mới (POST /api/products)
+        run: |
+          echo "Gửi request POST tạo sản phẩm:"
+          RESPONSE=$(curl -s -X POST http://localhost:3000/api/products \
+            -H "Content-Type: application/json" \
+            -d '{"pid": "CI_P001", "pname": "CI Test Laptop", "price": 12000000, "quantity": 5}')
+          echo "Phản hồi từ API: $RESPONSE"
+          echo "$RESPONSE" | grep -q "CI_P001"
+
+      - name: 8. Test thử nghiệm lấy danh sách sản phẩm (GET /api/products)
+        run: |
+          echo "Gửi request GET danh sách sản phẩm:"
+          curl -s http://localhost:3000/api/products | grep -q "CI_P001"
+          echo "API hoạt động chính xác!"
+
+      - name: 9. Dọn dẹp containers và volumes sau khi test
+        if: always()
+        run: docker compose down -v

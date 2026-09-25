@@ -44,7 +44,7 @@ services:
 
 volumes:
   mongodb_data:
-    external: true
+    name: mongodb_data
 
 networks:
   product_net:
