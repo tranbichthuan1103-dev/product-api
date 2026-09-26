@@ -1,0 +1,265 @@
+name: Test Product CI - Production Ready
+
+on:
+  push:
+    branches:
+      - main
+      - Prompt-1
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  production-ci-pipeline:
+    name: Production CI & CRUD Verification Pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 1. Checkout mã nguồn
+        uses: actions/checkout@v4
+
+      - name: 2. Thiết lập môi trường Node.js LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 3. Cài đặt các gói phụ thuộc (Dependencies)
+        run: npm ci
+
+      - name: 4. Build Docker Image cho Product API (Production)
+        run: |
+          echo "Bắt đầu build Docker image phiên bản Production..."
+          docker compose build --no-cache
+
+      - name: 5. Khởi chạy hệ thống MongoDB & Product API bằng Docker Compose
+        run: |
+          echo "Khởi động các container trong chế độ detached..."
+          docker compose up -d
+
+          echo "Đợi hệ thống khởi động và kiểm tra trạng thái sẵn sàng..."
+          for i in {1..30}; do
+            STATUS=$(curl -s http://localhost:3000/health | jq -r '.status' 2>/dev/null || true)
+            DB_STATUS=$(curl -s http://localhost:3000/health | jq -r '.database' 2>/dev/null || true)
+            if [ "$STATUS" = "UP" ] && [ "$DB_STATUS" = "connected" ]; then
+              echo ">>> Product API và MongoDB đã sẵn sàng và Healthy sau $((i * 2))s!"
+              break
+            fi
+            echo "Đang chờ dịch vụ sẵn sàng (thử lần $i/30)..."
+            sleep 2
+          done
+
+          echo "Trạng thái các container:"
+          docker compose ps
+
+      - name: 6. Chạy bộ kiểm thử tự động Jest (Automated Unit & Integration Tests)
+        env:
+          MONGO_URI: mongodb://admin:admin123@localhost:27017/productdb?authSource=admin
+        run: |
+          echo "Thực thi kiểm thử tích hợp Jest trực tiếp với cơ sở dữ liệu MongoDB trên máy ảo..."
+          npm test
+
+      - name: 7. Kiểm tra Endpoint Health Check thực tế
+        run: |
+          echo "Kiểm tra phản hồi từ endpoint /health của container Product API:"
+          HEALTH_RES=$(curl -s -f http://localhost:3000/health)
+          echo "Response: $HEALTH_RES"
+          echo "$HEALTH_RES" | jq .
+          STATUS=$(echo "$HEALTH_RES" | jq -r '.status')
+          DB=$(echo "$HEALTH_RES" | jq -r '.database')
+
+          if [ "$STATUS" != "UP" ] || [ "$DB" != "connected" ]; then
+            echo "::error::Endpoint /health chưa đạt trạng thái sẵn sàng: status=$STATUS, database=$DB"
+            exit 1
+          fi
+
+      - name: 8. [CRUD - CREATE] Test thêm sản phẩm mới (POST /api/products)
+        run: |
+          echo "Gửi request POST để tạo sản phẩm mới trên môi trường triển khai thực tế..."
+          HTTP_CODE=$(curl -s -o /tmp/create_product.json -w "%{http_code}" -X POST http://localhost:3000/api/products \
+            -H "Content-Type: application/json" \
+            -d '{
+              "pid": "PROD_PROD100",
+              "pname": "Dell XPS 15 OLED Core i9",
+              "price": 54000000,
+              "quantity": 10
+            }')
+
+          echo "HTTP Status Code: $HTTP_CODE"
+          cat /tmp/create_product.json
+          echo ""
+
+          if [ "$HTTP_CODE" -ne 201 ]; then
+            echo "::error::Tạo sản phẩm thất bại! Mã HTTP trả về không phải 201 Created (Code: $HTTP_CODE)"
+            exit 1
+          fi
+
+          PRODUCT_ID=$(jq -r '._id' /tmp/create_product.json)
+          if [ -z "$PRODUCT_ID" ] || [ "$PRODUCT_ID" == "null" ]; then
+            echo "::error::Không thể trích xuất _id từ phản hồi của API"
+            exit 1
+          fi
+
+          echo "Tạo sản phẩm thành công với _id: $PRODUCT_ID"
+          echo "PROD_ID=$PRODUCT_ID" >> $GITHUB_ENV
+
+      - name: 9. [CRUD - READ ALL] Test lấy danh sách tất cả sản phẩm (GET /api/products)
+        run: |
+          echo "Gửi request GET để lấy toàn bộ danh sách sản phẩm..."
+          HTTP_CODE=$(curl -s -o /tmp/get_all_products.json -w "%{http_code}" http://localhost:3000/api/products)
+
+          echo "HTTP Status Code: $HTTP_CODE"
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "::error::Lấy danh sách sản phẩm thất bại! (Code: $HTTP_CODE)"
+            exit 1
+          fi
+
+          if ! grep -q "PROD_PROD100" /tmp/get_all_products.json; then
+            echo "::error::Không tìm thấy mã sản phẩm PROD_PROD100 trong danh sách trả về!"
+            cat /tmp/get_all_products.json
+            exit 1
+          fi
+
+          TOTAL_COUNT=$(jq '. | length' /tmp/get_all_products.json)
+          echo "Lấy danh sách sản phẩm thành công! Tổng số sản phẩm hiện có: $TOTAL_COUNT"
+
+      - name: 10. [CRUD - READ BY ID] Test lấy thông tin chi tiết sản phẩm theo ID (GET /api/products/:id)
+        run: |
+          echo "Gửi request GET chi tiết cho sản phẩm có ID: $PROD_ID..."
+          HTTP_CODE=$(curl -s -o /tmp/get_product_detail.json -w "%{http_code}" "http://localhost:3000/api/products/$PROD_ID")
+
+          echo "HTTP Status Code: $HTTP_CODE"
+          cat /tmp/get_product_detail.json
+          echo ""
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "::error::Lấy chi tiết sản phẩm thất bại! (Code: $HTTP_CODE)"
+            exit 1
+          fi
+
+          RET_PID=$(jq -r '.pid' /tmp/get_product_detail.json)
+          RET_PRICE=$(jq -r '.price' /tmp/get_product_detail.json)
+
+          if [ "$RET_PID" != "PROD_PROD100" ] || [ "$RET_PRICE" != "54000000" ]; then
+            echo "::error::Dữ liệu chi tiết sản phẩm không khớp với dữ liệu đã tạo!"
+            exit 1
+          fi
+
+          echo "Lấy chi tiết sản phẩm theo ID thành công!"
+
+      - name: 11. [CRUD - UPDATE] Test cập nhật sản phẩm theo ID (PUT /api/products/:id)
+        run: |
+          echo "Gửi request PUT để cập nhật thông tin sản phẩm ID: $PROD_ID..."
+          HTTP_CODE=$(curl -s -o /tmp/update_product.json -w "%{http_code}" -X PUT "http://localhost:3000/api/products/$PROD_ID" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "pname": "Dell XPS 15 OLED Core i9 (Updated Edition)",
+              "price": 49990000,
+              "quantity": 18
+            }')
+
+          echo "HTTP Status Code: $HTTP_CODE"
+          cat /tmp/update_product.json
+          echo ""
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "::error::Cập nhật sản phẩm thất bại! (Code: $HTTP_CODE)"
+            exit 1
+          fi
+
+          UPDATED_PNAME=$(jq -r '.pname' /tmp/update_product.json)
+          UPDATED_PRICE=$(jq -r '.price' /tmp/update_product.json)
+          UPDATED_QUANTITY=$(jq -r '.quantity' /tmp/update_product.json)
+
+          if [ "$UPDATED_PRICE" != "49990000" ] || [ "$UPDATED_QUANTITY" != "18" ]; then
+            echo "::error::Dữ liệu sau khi cập nhật không chính xác!"
+            exit 1
+          fi
+
+          echo "Cập nhật sản phẩm thành công! Tên mới: $UPDATED_PNAME, Giá mới: $UPDATED_PRICE, SL: $UPDATED_QUANTITY"
+
+      - name: 12. [VALIDATION & ERROR HANDLING] Test kiểm tra các ràng buộc dữ liệu
+        run: |
+          echo "12.1. Test tạo sản phẩm trùng mã pid (Mong đợi HTTP 400):"
+          DUP_CODE=$(curl -s -o /tmp/dup_res.json -w "%{http_code}" -X POST http://localhost:3000/api/products \
+            -H "Content-Type: application/json" \
+            -d '{"pid": "PROD_PROD100", "pname": "Laptop Trung Ma", "price": 20000000, "quantity": 1}')
+          echo "Mã HTTP: $DUP_CODE"
+          cat /tmp/dup_res.json
+          echo ""
+          if [ "$DUP_CODE" -ne 400 ]; then
+            echo "::error::Hệ thống không chặn được việc trùng mã pid (Mong đợi 400, nhận $DUP_CODE)"
+            exit 1
+          fi
+
+          echo "12.2. Test tạo sản phẩm với giá âm (Mong đợi HTTP 400):"
+          INVALID_CODE=$(curl -s -o /tmp/invalid_res.json -w "%{http_code}" -X POST http://localhost:3000/api/products \
+            -H "Content-Type: application/json" \
+            -d '{"pid": "PROD_NEG01", "pname": "Laptop Gia Am", "price": -5000000, "quantity": 1}')
+          echo "Mã HTTP: $INVALID_CODE"
+          cat /tmp/invalid_res.json
+          echo ""
+          if [ "$INVALID_CODE" -ne 400 ]; then
+            echo "::error::Hệ thống không chặn được giá trị giá âm (Mong đợi 400, nhận $INVALID_CODE)"
+            exit 1
+          fi
+
+          echo "12.3. Test truy vấn với ObjectId không hợp lệ (Mong đợi HTTP 400):"
+          BAD_ID_CODE=$(curl -s -o /tmp/bad_id_res.json -w "%{http_code}" "http://localhost:3000/api/products/invalid-object-id-123")
+          echo "Mã HTTP: $BAD_ID_CODE"
+          cat /tmp/bad_id_res.json
+          echo ""
+          if [ "$BAD_ID_CODE" -ne 400 ]; then
+            echo "::error::Hệ thống không xử lý đúng mã lỗi 400 khi sai định dạng ObjectId (Nhận $BAD_ID_CODE)"
+            exit 1
+          fi
+
+          echo "Tất cả các kịch bản kiểm tra ràng buộc & lỗi hoạt động chính xác!"
+
+      - name: 13. [CRUD - DELETE] Test xóa sản phẩm theo ID (DELETE /api/products/:id)
+        run: |
+          echo "Gửi request DELETE để xóa sản phẩm ID: $PROD_ID..."
+          HTTP_CODE=$(curl -s -o /tmp/delete_product.json -w "%{http_code}" -X DELETE "http://localhost:3000/api/products/$PROD_ID")
+
+          echo "HTTP Status Code: $HTTP_CODE"
+          cat /tmp/delete_product.json
+          echo ""
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "::error::Xóa sản phẩm thất bại! (Code: $HTTP_CODE)"
+            exit 1
+          fi
+
+          echo "Xóa sản phẩm thành công!"
+
+      - name: 14. [CRUD - VERIFY DELETION] Test xác thực sản phẩm đã bị xóa hoàn toàn (GET /api/products/:id)
+        run: |
+          echo "Gửi request GET kiểm tra lại ID vừa xóa: $PROD_ID (Mong đợi HTTP 404)..."
+          HTTP_CODE=$(curl -s -o /tmp/verify_delete.json -w "%{http_code}" "http://localhost:3000/api/products/$PROD_ID")
+
+          echo "HTTP Status Code: $HTTP_CODE"
+          cat /tmp/verify_delete.json
+          echo ""
+
+          if [ "$HTTP_CODE" -ne 404 ]; then
+            echo "::error::Sản phẩm chưa bị xóa khỏi cơ sở dữ liệu! Mong đợi 404 Not Found nhưng nhận về $HTTP_CODE"
+            exit 1
+          fi
+
+          echo "Xác nhận thành công: Sản phẩm đã được xóa hoàn toàn khỏi cơ sở dữ liệu MongoDB!"
+
+      - name: 15. In log container khi có lỗi phát sinh (Troubleshooting)
+        if: failure()
+        run: |
+          echo "=== DUMP LOGS CHO CONTAINER PRODUCT-API ==="
+          docker compose logs product-api
+          echo "=== DUMP LOGS CHO CONTAINER MONGODB ==="
+          docker compose logs mongodb
+
+      - name: 16. Dọn dẹp tài nguyên containers và volumes
+        if: always()
+        run: |
+          echo "Dọn dẹp hệ thống Docker Compose sau khi hoàn thành test pipeline..."
+          docker compose down -v
