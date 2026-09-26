@@ -10,7 +10,7 @@ describe('Product API & Health Check Tests', () => {
   beforeAll(async () => {
     const mongoURI =
       process.env.MONGO_URI ||
-      'mongodb://admin:admin123@localhost:27017/productdb?authSource=admin';
+      'mongodb://admin:admin123@127.0.0.1:27017/productdb?authSource=admin';
     await mongoose.connect(mongoURI);
     // Đảm bảo index unique được tạo xong
     await Product.init();

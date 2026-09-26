@@ -56,7 +56,7 @@ jobs:
 
       - name: 6. Chạy bộ kiểm thử tự động Jest (Automated Unit & Integration Tests)
         env:
-          MONGO_URI: mongodb://admin:admin123@localhost:27017/productdb?authSource=admin
+          MONGO_URI: mongodb://admin:admin123@127.0.0.1:27017/productdb?authSource=admin
         run: |
           echo "Thực thi kiểm thử tích hợp Jest trực tiếp với cơ sở dữ liệu MongoDB trên máy ảo..."
           npm test
