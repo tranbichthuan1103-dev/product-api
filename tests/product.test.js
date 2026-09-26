@@ -12,6 +12,8 @@ describe('Product API & Health Check Tests', () => {
       process.env.MONGO_URI ||
       'mongodb://admin:admin123@localhost:27017/productdb?authSource=admin';
     await mongoose.connect(mongoURI);
+    // Đảm bảo index unique được tạo xong
+    await Product.init();
     // Dọn dẹp dữ liệu test cũ nếu có
     await Product.deleteMany({ pid: { $regex: /^TEST_/ } });
   });
