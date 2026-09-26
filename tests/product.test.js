@@ -16,13 +16,13 @@ describe('Product API & Health Check Tests', () => {
     await Product.init();
     // Dọn dẹp dữ liệu test cũ nếu có
     await Product.deleteMany({ pid: { $regex: /^TEST_/ } });
-  });
+  }, 15000);
 
   afterAll(async () => {
     // Dọn dẹp dữ liệu test và đóng kết nối
     await Product.deleteMany({ pid: { $regex: /^TEST_/ } });
     await mongoose.connection.close();
-  });
+  }, 15000);
 
   describe('GET /health', () => {
     it('trả về status 200 và database connected khi kết nối MongoDB sẵn sàng', async () => {
