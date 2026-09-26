@@ -138,3 +138,36 @@ Quy trình CI/CD tự động hóa được thiết lập tại [`.github/workfl
    - Đóng gói Docker Image và tự động đánh nhãn (`latest`, `sha-<commit>`, `<branch>`).
    - Đẩy (Push) image hoàn chỉnh lên Docker Hub Registry.
 
+---
+
+## 6. Triển khai Production từ Docker Hub (`docker-compose-prod.yaml`)
+
+Sau khi CD Pipeline đẩy image thành công lên Docker Hub, bạn có thể triển khai hệ thống trên bất kỳ máy chủ hoặc Docker Engine local nào mà **không cần mã nguồn hoặc build lại image**:
+
+1. **Kéo image mới nhất từ Docker Hub**:
+   ```bash
+   docker compose -f docker-compose-prod.yaml pull
+   ```
+
+2. **Khởi chạy hệ thống**:
+   ```bash
+   docker compose -f docker-compose-prod.yaml up -d
+   ```
+
+3. **Kiểm tra trạng thái (Container chạy từ image Docker Hub & Healthy)**:
+   ```bash
+   docker compose -f docker-compose-prod.yaml ps
+   docker ps
+   ```
+
+4. **Kiểm tra Healthcheck Endpoint**:
+   ```bash
+   curl http://localhost:3000/health
+   ```
+
+5. **Dừng hệ thống**:
+   ```bash
+   docker compose -f docker-compose-prod.yaml down
+   ```
+
+

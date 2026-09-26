@@ -183,3 +183,119 @@ Quy trình tự động hóa được thiết lập trong `.github/workflows/tes
    - Job `Production CI & CRUD Verification Pipeline` chạy trước và xanh (Success).
    - Job `CD Pipeline - Deploy to Docker Hub` được kích hoạt và hoàn tất đẩy image.
 3. Truy cập Docker Hub: Image `username/product-api` sẽ xuất hiện với đầy đủ các tag (`latest`, `sha-xxx`,...).
+
+---
+
+# 13. Tạo docker-compose-prod.yaml và chạy container từ Docker Hub trên Local Docker Engine sau khi CD
+
+## 13.1. Mục đích và sự khác biệt
+- **`docker-compose.yml` (Development / Local Build)**: Chứa chỉ thị `build: .` để biên dịch trực tiếp từ mã nguồn local. Sử dụng trong quá trình phát triển ứng dụng hoặc trong bước kiểm thử CI Pipeline.
+- **`docker-compose-prod.yaml` (Production Deployment)**: Không biên dịch mã nguồn local mà chỉ định trực tiếp `image: ${DOCKERHUB_USERNAME:-tranbichthuan1103}/product-api:${IMAGE_TAG:-latest}` từ Docker Hub Registry cùng chỉ thị `pull_policy: always`. Điều này đảm bảo môi trường local/staging/server luôn chạy đúng bản build đã được CI kiểm thử vượt qua và CD đóng gói đẩy lên Docker Hub.
+
+## 13.2. Cấu trúc cấu hình `docker-compose-prod.yaml`
+```yaml
+services:
+  mongodb:
+    image: mongo:8
+    container_name: nammongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - product_net
+    healthcheck:
+      test: ["CMD", "mongosh", "-u", "admin", "-p", "admin123", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  product-api:
+    image: ${DOCKERHUB_USERNAME:-tranbichthuan1103}/product-api:${IMAGE_TAG:-latest}
+    pull_policy: always
+    container_name: product-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      MONGO_URI: mongodb://admin:admin123@mongodb:27017/productdb?authSource=admin
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - product_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  mongodb_data:
+    name: mongodb_data
+
+networks:
+  product_net:
+    driver: bridge
+```
+
+## 13.3. Các bước kéo image và khởi chạy trên Local Docker Engine
+
+### Bước 1: Kéo (Pull) image mới nhất từ Docker Hub về máy
+```bash
+docker compose -f docker-compose-prod.yaml pull
+```
+*(Hoặc chỉ định tag cụ thể nếu cần: `$env:IMAGE_TAG="sha-xxxx"; docker compose -f docker-compose-prod.yaml pull`)*
+
+### Bước 2: Khởi động hệ thống Production ở chế độ nền
+```bash
+docker compose -f docker-compose-prod.yaml up -d
+```
+> Khi chạy lệnh này, Docker Compose sẽ tự động nhận diện nếu có container cũ đang chạy để recreate (tạo mới) container bằng Image vừa kéo từ Docker Hub.
+
+### Bước 3: Xác thực container đang chạy Image từ Docker Hub
+Kiểm tra danh sách container và trạng thái Healthcheck:
+```bash
+docker compose -f docker-compose-prod.yaml ps
+```
+Hoặc dùng lệnh Docker Native:
+```bash
+docker ps
+```
+**Kết quả mong đợi:**
+- Cột `IMAGE` hiển thị `tranbichthuan1103/product-api:latest`.
+- Cột `STATUS` hiển thị `Up ... (healthy)`.
+
+### Bước 4: Kiểm tra log khởi động của API
+```bash
+docker compose -f docker-compose-prod.yaml logs -f product-api
+```
+
+### Bước 5: Kiểm tra trạng thái ứng dụng qua endpoint Healthcheck
+Sử dụng curl hoặc PowerShell:
+```bash
+curl http://localhost:3000/health
+```
+**Kết quả JSON trả về:**
+```json
+{"status":"UP","database":"connected"}
+```
+
+## 13.4. Dọn dẹp và dừng hệ thống
+- Tắt các dịch vụ Production:
+  ```bash
+  docker compose -f docker-compose-prod.yaml down
+  ```
+- Tắt và xóa toàn bộ kèm theo volume dữ liệu (nếu muốn reset trắng database):
+  ```bash
+  docker compose -f docker-compose-prod.yaml down -v
+  ```
+
