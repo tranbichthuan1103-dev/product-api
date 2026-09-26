@@ -174,8 +174,8 @@ Quy trình tự động hóa được thiết lập trong `.github/workflows/tes
    - Truy cập vào Repository trên GitHub: `tranbichthuan1103-dev/product-api`.
    - Vào mục **Settings** -> **Secrets and variables** -> **Actions**.
    - Nhấn **New repository secret** và thêm lần lượt 2 biến:
-     - `DOCKERHUB_USERNAME`: Tên tài khoản Docker Hub của bạn (ví dụ: `tranbichthuan1103`).
-     - `DOCKERHUB_TOKEN`: Chuỗi Access Token vừa tạo ở Bước 1.
+     - `DOCKERHUB_USERNAME`: Tên tài khoản Docker Hub của bạn (ví dụ: `tranbichthuan1103`). *(Lưu ý: Không để khoảng trắng / dấu cách thừa ở đầu hoặc cuối)*.
+     - `DOCKERHUB_TOKEN`: Chuỗi Access Token vừa tạo ở Bước 1. *(Lưu ý: Không để khoảng trắng / dấu cách thừa)*.
 
 ## 12.4. Kiểm tra kết quả triển khai
 1. Mỗi khi `push` code lên branch `main` hoặc `Prompt-1`, GitHub Actions sẽ tự động kích hoạt workflow.

@@ -298,23 +298,35 @@ jobs:
       - name: 2. Thiết lập Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 3. Đăng nhập Docker Hub
+      - name: 3. Làm sạch và chuẩn hóa biến môi trường Docker Hub
+        id: prep
+        env:
+          DOCKER_USER_SECRET: ${{ secrets.DOCKERHUB_USERNAME || secrets.DOCKER_USERNAME }}
+        run: |
+          CLEAN_USER=$(echo "$DOCKER_USER_SECRET" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+          if [ -z "$CLEAN_USER" ]; then
+            echo "::error::DOCKERHUB_USERNAME hoặc DOCKER_USERNAME chưa được thiết lập trong GitHub Secrets!"
+            exit 1
+          fi
+          echo "docker_user=$CLEAN_USER" >> $GITHUB_OUTPUT
+
+      - name: 4. Đăng nhập Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME || secrets.DOCKER_USERNAME }}
+          username: ${{ steps.prep.outputs.docker_user }}
           password: ${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKER_PASSWORD }}
 
-      - name: 4. Thiết lập metadata và gắn thẻ (Tags & Labels) cho Docker Image
+      - name: 5. Thiết lập metadata và gắn thẻ (Tags & Labels) cho Docker Image
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME || secrets.DOCKER_USERNAME }}/product-api
+          images: ${{ steps.prep.outputs.docker_user }}/product-api
           tags: |
             type=raw,value=latest
             type=sha,format=short,prefix=sha-
             type=ref,event=branch
 
-      - name: 5. Build và Push Docker Image lên Docker Hub
+      - name: 6. Build và Push Docker Image lên Docker Hub
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -325,11 +337,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: 6. Tổng kết kết quả triển khai CD (Deployment Summary)
+      - name: 7. Tổng kết kết quả triển khai CD (Deployment Summary)
         run: |
           echo "=========================================================="
           echo "🚀 CD PIPELINE: PUSH LÊN DOCKER HUB THÀNH CÔNG!"
-          echo "Docker Hub Repository: ${{ secrets.DOCKERHUB_USERNAME || secrets.DOCKER_USERNAME }}/product-api"
+          echo "Docker Hub Repository: ${{ steps.prep.outputs.docker_user }}/product-api"
           echo "Các tags đã push:"
           echo "${{ steps.meta.outputs.tags }}"
           echo "Đảm bảo: Quá trình CI (bao gồm Healthcheck & Tests) đã hoàn thành xuất sắc trước khi CD chạy."
