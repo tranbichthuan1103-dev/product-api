@@ -108,3 +108,78 @@ cồn cái dưới là full chuc nang
 nhưng mà thầy chấm theo từng promt mà 
 
 vạy phải làm rieng tung cai. thấy e lấy hình promt dưới tuỏng muốn làm full , tại đầu thầy gửi cái hình đó dưới pr1 sau đó thu hồi gửi lại nên e tưởng nó của bài 1, OH
+
+---
+
+# 12. Tiến hành thực hiện CD với Docker Hub (Đảm bảo Healthcheck trong bước CI)
+
+## 12.1. Kiến trúc luồng CI/CD Pipeline
+Quy trình tự động hóa được thiết lập trong `.github/workflows/test-productci-prod.yml` gồm 2 giai đoạn (Jobs) tuần tự và có điều kiện ràng buộc:
+
+```
+[ Git Push / PR ]
+       │
+       ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 1. PRODUCTION CI PIPELINE (ci-pipeline)                     │
+│    - Setup Node 20 LTS & npm ci                             │
+│    - Build Docker Image (Production)                        │
+│    - Khởi chạy Docker Compose (product-api + nammongodb)    │
+│    - [BẮT BUỘC] Xác thực Healthcheck 2 tầng:                │
+│        + Tầng 1 (Docker Daemon): Container đạt (healthy)   │
+│        + Tầng 2 (Application API): Endpoint /health trả    │
+│          về status: 'UP' & database: 'connected'            │
+│    - Chạy bộ kiểm thử Jest (Automated Tests)                │
+│    - Chạy bộ test tích hợp toàn diện CRUD API & validation  │
+│    - Dọn dẹp môi trường (docker compose down -v)           │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+               (CI & Healthcheck Thành công 100%)
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 2. DOCKER HUB CD PIPELINE (cd-pipeline)                     │
+│    - Ràng buộc: `needs: production-ci-pipeline`             │
+│    - Thiết lập Docker Buildx                                │
+│    - Xác thực đăng nhập Docker Hub qua GitHub Secrets       │
+│    - Trích xuất metadata và đánh nhãn đa tầng:              │
+│        + :latest                                            │
+│        + :sha-<short_commit_sha>                            │
+│        + :<branch_name>                                     │
+│    - Build và đẩy Image hoàn thiện lên Docker Hub Registry  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## 12.2. Cơ chế đảm bảo Healthcheck trong bước CI
+1. **Container-level Healthcheck**: Sử dụng lệnh `docker inspect` kiểm tra định kỳ trạng thái sức khỏe do Docker engine theo dõi. Cả hai dịch vụ `nammongodb` và `product-api` đều phải đạt trạng thái `healthy`.
+2. **HTTP Endpoint Healthcheck**: Gửi request trực tiếp đến `http://localhost:3000/health`. API chỉ được coi là hợp lệ khi trả về mã HTTP `200` cùng cấu trúc:
+   ```json
+   {
+     "status": "UP",
+     "database": "connected"
+   }
+   ```
+3. **Cơ chế Gating**: Nếu container bị lỗi kết nối MongoDB (ví dụ: database down), endpoint trả về `503`, bước Healthcheck lập tức kích hoạt `exit 1`. Khi đó toàn bộ CI Pipeline sẽ **FAILED**, và GitHub Actions sẽ **chặn hoàn toàn** bước CD, đảm bảo không có image lỗi nào được đẩy lên Docker Hub.
+
+## 12.3. Hướng dẫn cấu hình GitHub Secrets
+Để bước CD có thể xác thực và đẩy Docker Image lên Docker Hub, cần bổ sung 2 secrets vào GitHub Repository:
+
+1. **Bước 1: Tạo Access Token trên Docker Hub**
+   - Đăng nhập vào [Docker Hub](https://hub.docker.com/).
+   - Chọn **Account Settings** -> **Security** -> **New Access Token**.
+   - Đặt tên mô tả (ví dụ: `github-actions-cd`) với quyền **Read & Write**.
+   - Sao chép chuỗi Token được cấp.
+
+2. **Bước 2: Cấu hình Secret trong GitHub Repository**
+   - Truy cập vào Repository trên GitHub: `tranbichthuan1103-dev/product-api`.
+   - Vào mục **Settings** -> **Secrets and variables** -> **Actions**.
+   - Nhấn **New repository secret** và thêm lần lượt 2 biến:
+     - `DOCKERHUB_USERNAME`: Tên tài khoản Docker Hub của bạn (ví dụ: `tranbichthuan1103`).
+     - `DOCKERHUB_TOKEN`: Chuỗi Access Token vừa tạo ở Bước 1.
+
+## 12.4. Kiểm tra kết quả triển khai
+1. Mỗi khi `push` code lên branch `main` hoặc `Prompt-1`, GitHub Actions sẽ tự động kích hoạt workflow.
+2. Kiểm tra tab **Actions** trên GitHub để theo dõi tiến trình:
+   - Job `Production CI & CRUD Verification Pipeline` chạy trước và xanh (Success).
+   - Job `CD Pipeline - Deploy to Docker Hub` được kích hoạt và hoàn tất đẩy image.
+3. Truy cập Docker Hub: Image `username/product-api` sẽ xuất hiện với đầy đủ các tag (`latest`, `sha-xxx`,...).

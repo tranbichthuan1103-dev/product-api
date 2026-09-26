@@ -116,3 +116,25 @@ Cơ sở URL: `http://localhost:3000`
    - Chạy production: `npm start`
    - Chạy chế độ watch tự reload: `npm run dev`
    - Chạy kiểm thử tự động: `npm test`
+
+---
+
+## 5. Quy trình CI/CD với GitHub Actions & Docker Hub
+
+Quy trình CI/CD tự động hóa được thiết lập tại [`.github/workflows/test-productci-prod.yml`](.github/workflows/test-productci-prod.yml):
+
+1. **Giai đoạn CI (Continuous Integration)**:
+   - Tự động chạy khi có `push` hoặc `pull_request` vào branch `main` / `Prompt-1`.
+   - Khởi chạy toàn bộ hệ thống bằng Docker Compose (`product-api` và `nammongodb`).
+   - **Đảm bảo Healthcheck nghiêm ngặt**:
+     - Kiểm tra trạng thái Docker Native Healthcheck của từng container (`docker inspect`).
+     - Kiểm tra phản hồi thực tế từ endpoint `GET /health` (`status: UP`, `database: connected`).
+     - Nếu Healthcheck hoặc bất kỳ bài test nào thất bại, quy trình CI sẽ dừng ngay lập tức.
+   - Chạy bộ kiểm thử tự động (Jest) và toàn bộ các kịch bản CRUD, xử lý ngoại lệ.
+
+2. **Giai đoạn CD (Continuous Deployment)**:
+   - **Điều kiện tiên quyết**: Phụ thuộc trực tiếp vào bước CI (`needs: production-ci-pipeline`). Chỉ khi CI và Healthcheck hoàn toàn vượt qua thì CD mới được chạy.
+   - Tự động đăng nhập vào Docker Hub sử dụng GitHub Secrets (`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`).
+   - Đóng gói Docker Image và tự động đánh nhãn (`latest`, `sha-<commit>`, `<branch>`).
+   - Đẩy (Push) image hoàn chỉnh lên Docker Hub Registry.
+
