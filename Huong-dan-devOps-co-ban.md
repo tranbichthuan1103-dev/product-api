@@ -182,4 +182,4 @@ Quy trình tự động hóa được thiết lập trong `.github/workflows/tes
 2. Kiểm tra tab **Actions** trên GitHub để theo dõi tiến trình:
    - Job `Production CI & CRUD Verification Pipeline` chạy trước và xanh (Success).
    - Job `CD Pipeline - Deploy to Docker Hub` được kích hoạt và hoàn tất đẩy image.
-3. Truy cập Docker Hub: Image `username/product-api` sẽ xuất hiện với đầy đủ các tag (`latest`, `sha-xxx`,...).
+3. Truy cập Docker Hub: Image `username/product-api` sẽ xuất hiện với đầy đủ các tag (`latest`, `sha-xxx`,...).
