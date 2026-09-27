@@ -1,4 +1,4 @@
-name: Test Product CI - Production Ready
+name: Product CI/CD Pipeline - Healthcheck & Docker Hub Deployment
 
 on:
   push:
@@ -41,8 +41,8 @@ jobs:
 
           echo "Đợi hệ thống khởi động và kiểm tra trạng thái sẵn sàng..."
           for i in {1..30}; do
-            STATUS=$(curl -s http://localhost:3000/health | jq -r '.status' 2>/dev/null || true)
-            DB_STATUS=$(curl -s http://localhost:3000/health | jq -r '.database' 2>/dev/null || true)
+            STATUS=$(curl -s http://127.0.0.1:3000/health | jq -r '.status' 2>/dev/null || true)
+            DB_STATUS=$(curl -s http://127.0.0.1:3000/health | jq -r '.database' 2>/dev/null || true)
             if [ "$STATUS" = "UP" ] && [ "$DB_STATUS" = "connected" ]; then
               echo ">>> Product API và MongoDB đã sẵn sàng và Healthy sau $((i * 2))s!"
               break
@@ -56,15 +56,34 @@ jobs:
 
       - name: 6. Chạy bộ kiểm thử tự động Jest (Automated Unit & Integration Tests)
         env:
-          MONGO_URI: mongodb://admin:admin123@localhost:27017/productdb?authSource=admin
+          MONGO_URI: mongodb://admin:admin123@127.0.0.1:27017/productdb?authSource=admin
+          NODE_OPTIONS: --experimental-vm-modules
         run: |
           echo "Thực thi kiểm thử tích hợp Jest trực tiếp với cơ sở dữ liệu MongoDB trên máy ảo..."
           npm test
 
-      - name: 7. Kiểm tra Endpoint Health Check thực tế
+      - name: 7. Xác thực nghiêm ngặt Healthcheck trong bước CI (Container & Endpoint)
         run: |
-          echo "Kiểm tra phản hồi từ endpoint /health của container Product API:"
-          HEALTH_RES=$(curl -s -f http://localhost:3000/health)
+          echo "=== 7.1. KIỂM TRA TRẠNG THÁI DOCKER NATIVE HEALTHCHECK ==="
+          for i in {1..20}; do
+            API_HEALTH=$(docker inspect --format='{{json .State.Health.Status}}' product-api 2>/dev/null | tr -d '"' || true)
+            MONGO_HEALTH=$(docker inspect --format='{{json .State.Health.Status}}' nammongodb 2>/dev/null | tr -d '"' || true)
+            echo "Lần $i: product-api health = [$API_HEALTH], nammongodb health = [$MONGO_HEALTH]"
+            if [ "$API_HEALTH" = "healthy" ] && [ "$MONGO_HEALTH" = "healthy" ]; then
+              echo ">>> Docker Healthcheck đạt chuẩn (healthy) cho cả hai container!"
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$API_HEALTH" != "healthy" ] || [ "$MONGO_HEALTH" != "healthy" ]; then
+            echo "::error::Một trong các container không đạt trạng thái healthy! product-api=$API_HEALTH, nammongodb=$MONGO_HEALTH"
+            docker compose ps
+            exit 1
+          fi
+
+          echo "=== 7.2. KIỂM TRA APPLICATION HEALTHCHECK ENDPOINT (/health) ==="
+          HEALTH_RES=$(curl -s -f http://127.0.0.1:3000/health)
           echo "Response: $HEALTH_RES"
           echo "$HEALTH_RES" | jq .
           STATUS=$(echo "$HEALTH_RES" | jq -r '.status')
@@ -74,11 +93,12 @@ jobs:
             echo "::error::Endpoint /health chưa đạt trạng thái sẵn sàng: status=$STATUS, database=$DB"
             exit 1
           fi
+          echo ">>> ĐẢM BẢO HEALTHCHECK THÀNH CÔNG TRONG BƯỚC CI! Đủ điều kiện chuyển tiếp sang CD."
 
       - name: 8. [CRUD - CREATE] Test thêm sản phẩm mới (POST /api/products)
         run: |
           echo "Gửi request POST để tạo sản phẩm mới trên môi trường triển khai thực tế..."
-          HTTP_CODE=$(curl -s -o /tmp/create_product.json -w "%{http_code}" -X POST http://localhost:3000/api/products \
+          HTTP_CODE=$(curl -s -o /tmp/create_product.json -w "%{http_code}" -X POST http://127.0.0.1:3000/api/products \
             -H "Content-Type: application/json" \
             -d '{
               "pid": "PROD_PROD100",
@@ -108,7 +128,7 @@ jobs:
       - name: 9. [CRUD - READ ALL] Test lấy danh sách tất cả sản phẩm (GET /api/products)
         run: |
           echo "Gửi request GET để lấy toàn bộ danh sách sản phẩm..."
-          HTTP_CODE=$(curl -s -o /tmp/get_all_products.json -w "%{http_code}" http://localhost:3000/api/products)
+          HTTP_CODE=$(curl -s -o /tmp/get_all_products.json -w "%{http_code}" http://127.0.0.1:3000/api/products)
 
           echo "HTTP Status Code: $HTTP_CODE"
           if [ "$HTTP_CODE" -ne 200 ]; then
@@ -128,7 +148,7 @@ jobs:
       - name: 10. [CRUD - READ BY ID] Test lấy thông tin chi tiết sản phẩm theo ID (GET /api/products/:id)
         run: |
           echo "Gửi request GET chi tiết cho sản phẩm có ID: $PROD_ID..."
-          HTTP_CODE=$(curl -s -o /tmp/get_product_detail.json -w "%{http_code}" "http://localhost:3000/api/products/$PROD_ID")
+          HTTP_CODE=$(curl -s -o /tmp/get_product_detail.json -w "%{http_code}" "http://127.0.0.1:3000/api/products/$PROD_ID")
 
           echo "HTTP Status Code: $HTTP_CODE"
           cat /tmp/get_product_detail.json
@@ -152,7 +172,7 @@ jobs:
       - name: 11. [CRUD - UPDATE] Test cập nhật sản phẩm theo ID (PUT /api/products/:id)
         run: |
           echo "Gửi request PUT để cập nhật thông tin sản phẩm ID: $PROD_ID..."
-          HTTP_CODE=$(curl -s -o /tmp/update_product.json -w "%{http_code}" -X PUT "http://localhost:3000/api/products/$PROD_ID" \
+          HTTP_CODE=$(curl -s -o /tmp/update_product.json -w "%{http_code}" -X PUT "http://127.0.0.1:3000/api/products/$PROD_ID" \
             -H "Content-Type: application/json" \
             -d '{
               "pname": "Dell XPS 15 OLED Core i9 (Updated Edition)",
@@ -183,7 +203,7 @@ jobs:
       - name: 12. [VALIDATION & ERROR HANDLING] Test kiểm tra các ràng buộc dữ liệu
         run: |
           echo "12.1. Test tạo sản phẩm trùng mã pid (Mong đợi HTTP 400):"
-          DUP_CODE=$(curl -s -o /tmp/dup_res.json -w "%{http_code}" -X POST http://localhost:3000/api/products \
+          DUP_CODE=$(curl -s -o /tmp/dup_res.json -w "%{http_code}" -X POST http://127.0.0.1:3000/api/products \
             -H "Content-Type: application/json" \
             -d '{"pid": "PROD_PROD100", "pname": "Laptop Trung Ma", "price": 20000000, "quantity": 1}')
           echo "Mã HTTP: $DUP_CODE"
@@ -195,7 +215,7 @@ jobs:
           fi
 
           echo "12.2. Test tạo sản phẩm với giá âm (Mong đợi HTTP 400):"
-          INVALID_CODE=$(curl -s -o /tmp/invalid_res.json -w "%{http_code}" -X POST http://localhost:3000/api/products \
+          INVALID_CODE=$(curl -s -o /tmp/invalid_res.json -w "%{http_code}" -X POST http://127.0.0.1:3000/api/products \
             -H "Content-Type: application/json" \
             -d '{"pid": "PROD_NEG01", "pname": "Laptop Gia Am", "price": -5000000, "quantity": 1}')
           echo "Mã HTTP: $INVALID_CODE"
@@ -207,7 +227,7 @@ jobs:
           fi
 
           echo "12.3. Test truy vấn với ObjectId không hợp lệ (Mong đợi HTTP 400):"
-          BAD_ID_CODE=$(curl -s -o /tmp/bad_id_res.json -w "%{http_code}" "http://localhost:3000/api/products/invalid-object-id-123")
+          BAD_ID_CODE=$(curl -s -o /tmp/bad_id_res.json -w "%{http_code}" "http://127.0.0.1:3000/api/products/invalid-object-id-123")
           echo "Mã HTTP: $BAD_ID_CODE"
           cat /tmp/bad_id_res.json
           echo ""
@@ -221,7 +241,7 @@ jobs:
       - name: 13. [CRUD - DELETE] Test xóa sản phẩm theo ID (DELETE /api/products/:id)
         run: |
           echo "Gửi request DELETE để xóa sản phẩm ID: $PROD_ID..."
-          HTTP_CODE=$(curl -s -o /tmp/delete_product.json -w "%{http_code}" -X DELETE "http://localhost:3000/api/products/$PROD_ID")
+          HTTP_CODE=$(curl -s -o /tmp/delete_product.json -w "%{http_code}" -X DELETE "http://127.0.0.1:3000/api/products/$PROD_ID")
 
           echo "HTTP Status Code: $HTTP_CODE"
           cat /tmp/delete_product.json
@@ -237,7 +257,7 @@ jobs:
       - name: 14. [CRUD - VERIFY DELETION] Test xác thực sản phẩm đã bị xóa hoàn toàn (GET /api/products/:id)
         run: |
           echo "Gửi request GET kiểm tra lại ID vừa xóa: $PROD_ID (Mong đợi HTTP 404)..."
-          HTTP_CODE=$(curl -s -o /tmp/verify_delete.json -w "%{http_code}" "http://localhost:3000/api/products/$PROD_ID")
+          HTTP_CODE=$(curl -s -o /tmp/verify_delete.json -w "%{http_code}" "http://127.0.0.1:3000/api/products/$PROD_ID")
 
           echo "HTTP Status Code: $HTTP_CODE"
           cat /tmp/verify_delete.json
@@ -263,3 +283,67 @@ jobs:
         run: |
           echo "Dọn dẹp hệ thống Docker Compose sau khi hoàn thành test pipeline..."
           docker compose down -v
+
+  dockerhub-cd-pipeline:
+    name: CD Pipeline - Deploy to Docker Hub
+    needs: production-ci-pipeline
+    if: success() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 1. Checkout mã nguồn
+        uses: actions/checkout@v4
+
+      - name: 2. Thiết lập Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 3. Làm sạch và chuẩn hóa biến môi trường Docker Hub
+        id: prep
+        env:
+          DOCKER_USER_SECRET: ${{ secrets.DOCKERHUB_USERNAME || secrets.DOCKER_USERNAME }}
+        run: |
+          CLEAN_USER=$(echo "$DOCKER_USER_SECRET" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+          if [ -z "$CLEAN_USER" ]; then
+            echo "::error::DOCKERHUB_USERNAME hoặc DOCKER_USERNAME chưa được thiết lập trong GitHub Secrets!"
+            exit 1
+          fi
+          echo "docker_user=$CLEAN_USER" >> $GITHUB_OUTPUT
+
+      - name: 4. Đăng nhập Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ steps.prep.outputs.docker_user }}
+          password: ${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKER_PASSWORD }}
+
+      - name: 5. Thiết lập metadata và gắn thẻ (Tags & Labels) cho Docker Image
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.prep.outputs.docker_user }}/product-api
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short,prefix=sha-
+            type=ref,event=branch
+
+      - name: 6. Build và Push Docker Image lên Docker Hub
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 7. Tổng kết kết quả triển khai CD (Deployment Summary)
+        run: |
+          echo "=========================================================="
+          echo "🚀 CD PIPELINE: PUSH LÊN DOCKER HUB THÀNH CÔNG!"
+          echo "Docker Hub Repository: ${{ steps.prep.outputs.docker_user }}/product-api"
+          echo "Các tags đã push:"
+          echo "${{ steps.meta.outputs.tags }}"
+          echo "Đảm bảo: Quá trình CI (bao gồm Healthcheck & Tests) đã hoàn thành xuất sắc trước khi CD chạy."
+          echo "=========================================================="
+

@@ -20,14 +20,14 @@ services:
       start_period: 5s
 
   product-api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${DOCKERHUB_USERNAME:-tranbichthuan1103}/product-api:${IMAGE_TAG:-latest}
+    pull_policy: always
     container_name: product-api
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
+      NODE_ENV: production
       PORT: 3000
       MONGO_URI: mongodb://admin:admin123@mongodb:27017/productdb?authSource=admin
     depends_on:
