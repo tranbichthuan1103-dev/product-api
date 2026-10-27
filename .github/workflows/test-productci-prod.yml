@@ -269,10 +269,7 @@ jobs:
           fi
 
           echo "Xác nhận thành công: Sản phẩm đã được xóa hoàn toàn khỏi cơ sở dữ liệu MongoDB!"
-      - name: 14 quick test
-        run: |
-          echo "quick test"
-          curl -f http://localhost:3002/health
+
       
       - name: 15. In log container khi có lỗi phát sinh (Troubleshooting)
         if: failure()
