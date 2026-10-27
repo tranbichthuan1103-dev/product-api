@@ -13,11 +13,11 @@ services:
     networks:
       - product_net
     healthcheck:
-      test: ["CMD", "mongosh", "-u", "admin", "-p", "admin123", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
-      interval: 5s
+      test: ["CMD-SHELL", "mongosh --quiet -u admin -p admin123 --authenticationDatabase admin --eval 'db.runCommand({ ping: 1 }).ok'"]
+      interval: 3s
       timeout: 5s
-      retries: 5
-      start_period: 5s
+      retries: 10
+      start_period: 30s
 
   product-api:
     image: ${DOCKERHUB_USERNAME:-tranbichthuan1103}/product-api:${IMAGE_TAG:-latest}
