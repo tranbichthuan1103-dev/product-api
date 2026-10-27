@@ -26,9 +26,9 @@ services:
     container_name: product-api
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3002:3002"
     environment:
-      PORT: 3000
+      PORT: 3002
       MONGO_URI: mongodb://admin:admin123@mongodb:27017/productdb?authSource=admin
     depends_on:
       mongodb:
@@ -36,7 +36,7 @@ services:
     networks:
       - product_net
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3002/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3

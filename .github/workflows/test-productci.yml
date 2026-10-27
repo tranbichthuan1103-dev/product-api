@@ -41,12 +41,12 @@ jobs:
       - name: 6. Test thử nghiệm Health Check endpoint
         run: |
           echo "Kiểm tra endpoint /health:"
-          curl -f http://localhost:3000/health || exit 1
+          curl -f http://localhost:3002/health || exit 1
 
       - name: 7. Test thử nghiệm tạo sản phẩm mới (POST /api/products)
         run: |
           echo "Gửi request POST tạo sản phẩm:"
-          RESPONSE=$(curl -s -X POST http://localhost:3000/api/products \
+          RESPONSE=$(curl -s -X POST http://localhost:3002/api/products \
             -H "Content-Type: application/json" \
             -d '{"pid": "CI_P001", "pname": "CI Test Laptop", "price": 12000000, "quantity": 5}')
           echo "Phản hồi từ API: $RESPONSE"
@@ -55,7 +55,7 @@ jobs:
       - name: 8. Test thử nghiệm lấy danh sách sản phẩm (GET /api/products)
         run: |
           echo "Gửi request GET danh sách sản phẩm:"
-          curl -s http://localhost:3000/api/products | grep -q "CI_P001"
+          curl -s http://localhost:3002/api/products | grep -q "CI_P001"
           echo "API hoạt động chính xác!"
 
       - name: 9. Dọn dẹp containers và volumes sau khi test
