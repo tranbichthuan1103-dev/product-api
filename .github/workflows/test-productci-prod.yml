@@ -103,7 +103,7 @@ jobs:
             -d '{
               "pid": "PROD_PROD100",
               "pname": "Dell XPS 15 OLED Core i9",
-              "price": 54000000,
+              "price": 540000,
               "quantity": 10
             }')
 
